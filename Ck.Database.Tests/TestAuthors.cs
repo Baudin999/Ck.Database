@@ -4,8 +4,10 @@ public class TestAuthors
 {
     
     [Fact]
-    public void StoreAutors()
+    public async void StoreAutors()
     {
+        var path = @"C:\TEMP\TestDbAuthors";
+        if (Directory.Exists(path)) Directory.Delete(path, true);
         var author = new Author
         {
             Name = "John Doe",
@@ -22,22 +24,21 @@ public class TestAuthors
             book.Author = author;
         }
 
-        var Path = @"C:\TEMP\TestDbAuthors";
-        var database = new Database(Path);
+        var database = new Database(path);
         database.Store(author);
         var authorId = author.Id;
 
         database.Dispose();
-        database = new Database(Path);
-        var secondAuthor = database.Find<Author>(authorId);
+        database = new Database(path);
+        var secondAuthor = await database.Find<Author>(authorId);
         Assert.Equal(2, secondAuthor.Books.Count);
 
         secondAuthor.Books.Remove(secondAuthor.Books[1]);
         database.Store(secondAuthor);
         
         database.Dispose();
-        database = new Database(Path);
-        var thirdAuthor = database.Find<Author>(authorId);
+        database = new Database(path);
+        var thirdAuthor = await database.Find<Author>(authorId);
         Assert.Single(thirdAuthor.Books);
 
     }

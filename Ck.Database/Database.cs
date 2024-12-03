@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Data;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
@@ -15,9 +15,8 @@ namespace Ck.Database
         private readonly string _databasePath;
         private readonly IdFarm _idFarm;
         private readonly Dictionary<string, object> _collections;
+        private readonly HashSet<int> _loadedIds = [];
         private Schema _schema;
-        private Dictionary<string, Metadata> _metadataDict;
-        public HashSet<int> _loadedIds = new HashSet<int>();
 
         public Database(string databasePath)
         {
@@ -27,7 +26,6 @@ namespace Ck.Database
             _idFarm = new IdFarm(databasePath);
             _collections = new Dictionary<string, object>();
             _schema = Schema.LoadFromJson(_databasePath);
-            _metadataDict = _schema.ToDictionary(m => m.Name);
         }
 
         public void Store<T>(T entity)
@@ -36,7 +34,7 @@ namespace Ck.Database
             Store(entity, processedEntities);
         }
 
-        private void Store<T>(T entity, HashSet<object> processedEntities)
+        private async void Store<T>(T entity, HashSet<object> processedEntities)
         {
             if (entity == null || processedEntities.Contains(entity))
                 return;
@@ -44,24 +42,23 @@ namespace Ck.Database
             processedEntities.Add(entity);
 
             var type = typeof(T);
-            var typeName = type.Name;
-            ValidateType<T>(typeName, type);
+            var metadata = ValidateType<T>(type);
+            var typeName = metadata.Name;
 
-            var metadata = _metadataDict[typeName];
-            var collection = GetOrCreateCollection<T>(typeName);
+            var collection = await GetOrCreateCollection<T>(typeName);
 
             // Assign Id if necessary
-            var idMember = GetIdMember(typeof(T));
-            int id = GetIdValue(entity, idMember);
-            if (id == 0)
+            //var idMember = GetIdMember(typeof(T));
+            int id = metadata.GetId(entity);
+            if (id <= 0)
             {
                 id = _idFarm.GetNextId();
-                SetIdValue(entity, idMember, id);
+                metadata.SetId(entity, id);
             }
             else
             {
                 // Remove existing entity with the same Id
-                var existingEntity = collection.FirstOrDefault(e => GetIdValue(e, idMember) == id);
+                var existingEntity = collection.FirstOrDefault(e => metadata.GetId(e) == id);
                 if (existingEntity != null)
                 {
                     collection.Remove(existingEntity);
@@ -74,38 +71,35 @@ namespace Ck.Database
             collection.Add(entity);
             SaveCollection(collection, typeName);
         }
-        public T Find<T>(int id)
+
+        public async Task<T> Find<T>(int id)
         {
             var type = typeof(T);
-            var typeName = type.Name;
-            ValidateType<T>(typeName, type);
+            var metadata = ValidateType<T>(type);
+            var typeName = metadata.Name;
 
-            var collection = GetOrCreateCollection<T>(typeName);
+            var collection = await GetOrCreateCollection<T>(typeName);
 
             var idMember = GetIdMember(typeof(T));
             var entity = collection.FirstOrDefault(e => GetIdValue(e, idMember) == id);
 
             if (entity != null)
             {
-                // Resolve references
-                var metadata = _metadataDict[typeName];
                 ResolveEntityReferences(entity, metadata);
             }
 
             return entity;
         }
 
-        public List<T> FindAll<T>()
+        public async Task<List<T>> FindAll<T>()
         {
-
             var type = typeof(T);
-            var typeName = type.Name;
-            ValidateType<T>(typeName, type);
+            var metadata = ValidateType<T>(type);
+            var typeName = metadata.Name;
 
-            var collection = GetOrCreateCollection<T>(typeName);
+            var collection = await GetOrCreateCollection<T>(typeName);
 
             // Resolve references for all entities
-            var metadata = _metadataDict[typeName];
             foreach (var entity in collection)
             {
                 ResolveEntityReferences(entity, metadata);
@@ -114,13 +108,13 @@ namespace Ck.Database
             return collection.ToList();
         }
 
-        public void Delete<T>(int id)
+        public async void Delete<T>(int id)
         {
             var type = typeof(T);
-            var typeName = type.Name;
-            ValidateType<T>(typeName, type);
+            var metadata = ValidateType<T>(type);
+            var typeName = metadata.Name;
 
-            var collection = GetOrCreateCollection<T>(typeName);
+            var collection = await GetOrCreateCollection<T>(typeName);
 
             var idMember = GetIdMember(typeof(T));
             var entity = collection.FirstOrDefault(e => GetIdValue(e, idMember) == id);
@@ -136,7 +130,7 @@ namespace Ck.Database
         }
 
 
-        private List<T> GetOrCreateCollection<T>(string typeName)
+        private async Task<List<T>> GetOrCreateCollection<T>(string typeName)
         {
             if (!_collections.TryGetValue(typeName, out var collectionObj))
             {
@@ -144,7 +138,7 @@ namespace Ck.Database
                 List<T> collection;
                 if (File.Exists(filePath))
                 {
-                    var json = File.ReadAllText(filePath);
+                    var json = await File.ReadAllTextAsync(filePath);
                     var settings = GetJsonSettings();
                     collection = JsonConvert.DeserializeObject<List<T>>(json, settings);
                 }
@@ -208,7 +202,7 @@ namespace Ck.Database
         }
 
 
-        private void ResolveEntityReferences(object entity, Metadata metadata)
+        private async void ResolveEntityReferences(object entity, Metadata metadata)
         {
             var idMember = GetIdMember(entity.GetType());
             int entityId = GetIdValue(entity, idMember);
@@ -234,12 +228,20 @@ namespace Ck.Database
                     int refId = GetIdValue(referenceValue, idMemberRef);
 
                     var method = typeof(Database).GetMethod(nameof(Find)).MakeGenericMethod(refField.Type);
-                    var referencedEntity = method.Invoke(this, new object[] { refId });
+                    var task = (Task)method.Invoke(this, new object[] { refId });
+
+                    // Await the Task to ensure proper handling of the asynchronous operation
+                    await task;
+
+                    // If the method has a return type, you need to get the result from the Task
+                    var resultProperty = task.GetType().GetProperty("Result");
+                    var referencedEntity = resultProperty?.GetValue(task);
+
+                    // Set the value to the member
                     SetMemberValue(entity, memberInfo, referencedEntity);
                 }
             }
 
-            // Resolve collection references
             foreach (var colRef in metadata.CollectionReferences)
             {
                 var memberInfo = GetMemberInfo(entity.GetType(), colRef.Name);
@@ -259,7 +261,14 @@ namespace Ck.Database
                             var idMemberItem = GetIdMember(colRef.ItemType);
                             int itemId = GetIdValue(item, idMemberItem);
 
-                            var resolvedItem = method.Invoke(this, new object[] { itemId });
+                            // Invoke the method and await the Task result
+                            var task = (Task)method.Invoke(this, new object[] { itemId });
+                            await task; // Ensure the task completes
+
+                            // Retrieve the resolved item from the Task's result
+                            var resultProperty = task.GetType().GetProperty("Result");
+                            var resolvedItem = resultProperty?.GetValue(task);
+
                             resolvedList.Add(resolvedItem);
                         }
                     }
@@ -267,14 +276,15 @@ namespace Ck.Database
                     SetMemberValue(entity, memberInfo, resolvedList);
                 }
             }
+
         }
 
-        private MemberInfo GetMemberInfo(Type type, string memberName)
+        private MemberInfo? GetMemberInfo(Type type, string memberName)
         {
             return type.GetMember(memberName, BindingFlags.Public | BindingFlags.Instance).FirstOrDefault();
         }
 
-        private object GetMemberValue(object obj, MemberInfo member)
+        private object? GetMemberValue(object obj, MemberInfo member)
         {
             return member switch
             {
@@ -341,26 +351,25 @@ namespace Ck.Database
             return new JsonSerializerSettings
             {
                 Formatting = Formatting.Indented,
-                ContractResolver = new MetadataContractResolver(_metadataDict)
+                ContractResolver = new MetadataContractResolver(_schema)
             };
         }
 
-        private void ValidateType<T>(string typeName, Type type)
+        private Metadata ValidateType<T>(Type type)
         {
-            if (!_metadataDict.ContainsKey(typeName))
+            if (!_schema.Contains(type))
             {
                 _schema = MetadataBuilder.BuildSchema(type, _schema);
-                _metadataDict = _schema.ToDictionary(m => m.Name);
-
                 _schema.SaveToJson(_databasePath);
             }
+
+            return _schema.GetMetadataByType(type);
         }
 
         public void Close()
         {
             _schema.SaveToJson(_databasePath);
             _collections.Clear();
-            _metadataDict.Clear();
         }
 
         public void Dispose()
@@ -371,19 +380,18 @@ namespace Ck.Database
 
     public class MetadataContractResolver : DefaultContractResolver
     {
-        private readonly Dictionary<string, Metadata> _metadataDict;
+        private readonly Schema _schema;
 
-        public MetadataContractResolver(Dictionary<string, Metadata> metadataDict)
+        public MetadataContractResolver(Schema schema)
         {
-            _metadataDict = metadataDict;
+            _schema = schema;
         }
 
         protected override JsonProperty CreateProperty(MemberInfo member, MemberSerialization memberSerialization)
         {
             var jsonProperty = base.CreateProperty(member, memberSerialization);
-            var declaringTypeName = member.DeclaringType.Name;
-
-            if (_metadataDict.TryGetValue(declaringTypeName, out var metadata))
+            var metadata = _schema.GetMetadataByType(member.DeclaringType);
+            if (metadata is not null)
             {
                 // Handle reference fields
                 if (metadata.ReferenceFields.Any(f => f.Name == member.Name))

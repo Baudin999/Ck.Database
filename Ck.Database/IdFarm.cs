@@ -34,9 +34,9 @@ public class IdFarm
         return _currentId;
     }
 
-    private void Save()
+    private async void Save()
     {
         // Save the current ID to the file
-        File.WriteAllText(_filePath, _currentId.ToString());
+        await File.WriteAllTextAsync(_filePath, _currentId.ToString());
     }
 }

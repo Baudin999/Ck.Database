@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using Newtonsoft.Json;
 
@@ -12,7 +13,7 @@ namespace Ck.Database
         public static Schema BuildSchema(Type t, Schema existingSchema = null)
         {
             var schema = existingSchema ?? new Schema();
-            
+
             // Check if the type is a runtime type
             if (t.IsGenericType && t.FullName == null)
             {
@@ -27,8 +28,8 @@ namespace Ck.Database
             }
 
             // Create metadata for the type
-            var metadata = new Metadata { Name = t.Name };
-            
+            var metadata = new Metadata { Name = t.Name, Type = t };
+
             // Add this type's metadata to the schema
             schema.Add(metadata);
 
@@ -43,7 +44,7 @@ namespace Ck.Database
                     HandleProperty((PropertyInfo)memberInfo, metadata, schema);
                 }
             }
-            
+
             return schema;
         }
 
@@ -52,6 +53,8 @@ namespace Ck.Database
             if (propertyInfo.Name == "Id" && propertyInfo.PropertyType == typeof(int))
             {
                 metadata.IsEntity = true;
+
+                // get a compiled lambda to get the Id of the entity
             }
 
             if (IsGenericReference(propertyInfo.PropertyType, out var genericArgument))
@@ -170,12 +173,105 @@ namespace Ck.Database
 
     public class Metadata
     {
+        public Type Type;
         public string Name;
         public bool IsEntity = false;
         public List<MetadataField> Fields = new List<MetadataField>();
         public List<MetadataReferenceField> ReferenceFields = new List<MetadataReferenceField>();
         public List<MetadataCollectionReference> CollectionReferences = new List<MetadataCollectionReference>();
         public Schema Schema = new Schema();
+
+        [JsonIgnore] private Func<object, int>? _getIdFunc = null;
+
+        [JsonIgnore] private Action<object, int>? _setIdFunc = null;
+
+        [JsonIgnore]
+        public Func<object, int> GetId
+        {
+            get
+            {
+                if (_getIdFunc is not null)
+                    return _getIdFunc;
+                
+
+                var idMember = Type.GetMember("Id", BindingFlags.Public | BindingFlags.Instance).FirstOrDefault();
+                if (idMember is PropertyInfo propertyInfo)
+                {
+                    // Create a compiled lambda to get the Id from the property
+                    var parameter = Expression.Parameter(typeof(object), "entity");
+                    var castEntity = Expression.Convert(parameter, Type);
+                    var propertyAccess = Expression.Property(castEntity, propertyInfo);
+                    var lambda = Expression.Lambda<Func<object, int>>(Expression.Convert(propertyAccess, typeof(int)),
+                        parameter);
+                    _getIdFunc = lambda.Compile();
+                }
+                else if (idMember is FieldInfo fieldInfo)
+                {
+                    // Create a compiled lambda to get the Id from the field
+                    var parameter = Expression.Parameter(typeof(object), "entity");
+                    var castEntity = Expression.Convert(parameter, Type);
+                    var fieldAccess = Expression.Field(castEntity, fieldInfo);
+                    var lambda =
+                        Expression.Lambda<Func<object, int>>(Expression.Convert(fieldAccess, typeof(int)), parameter);
+                    _getIdFunc = lambda.Compile();
+                }
+
+                if (_getIdFunc is null)
+                {
+                    throw new InvalidOperationException($"Id member not found on type '{Name}'.");
+                }
+
+                return _getIdFunc;
+            }
+        }
+
+        [JsonIgnore]
+        public Action<object, int> SetId
+        {
+            get
+            {
+                if (_setIdFunc is not null)
+                    return _setIdFunc;
+
+
+                var idMember = Type.GetMember("Id", BindingFlags.Public | BindingFlags.Instance).FirstOrDefault();
+                if (idMember is PropertyInfo propertyInfo)
+                {
+                    if (!propertyInfo.CanWrite)
+                        throw new InvalidOperationException($"Id property on type '{Name}' is read-only.");
+
+                    // Create a compiled lambda to set the Id to the property
+                    var entityParameter = Expression.Parameter(typeof(object), "entity");
+                    var valueParameter = Expression.Parameter(typeof(int), "value");
+                    var castEntity = Expression.Convert(entityParameter, Type);
+                    var propertyAccess = Expression.Property(castEntity, propertyInfo);
+                    var assign = Expression.Assign(propertyAccess,
+                        Expression.Convert(valueParameter, propertyInfo.PropertyType));
+                    var lambda = Expression.Lambda<Action<object, int>>(assign, entityParameter, valueParameter);
+                    _setIdFunc = lambda.Compile();
+                }
+                else if (idMember is FieldInfo fieldInfo)
+                {
+                    // Create a compiled lambda to set the Id to the field
+                    var entityParameter = Expression.Parameter(typeof(object), "entity");
+                    var valueParameter = Expression.Parameter(typeof(int), "value");
+                    var castEntity = Expression.Convert(entityParameter, Type);
+                    var fieldAccess = Expression.Field(castEntity, fieldInfo);
+                    var assign = Expression.Assign(fieldAccess,
+                        Expression.Convert(valueParameter, fieldInfo.FieldType));
+                    var lambda = Expression.Lambda<Action<object, int>>(assign, entityParameter, valueParameter);
+                    _setIdFunc = lambda.Compile();
+                }
+
+                if (_setIdFunc is null)
+                {
+                    throw new InvalidOperationException($"Id member not found or not writable on type '{Name}'.");
+                }
+
+                return _setIdFunc;
+            }
+        }
+
 
         public override string ToString()
         {
@@ -244,13 +340,21 @@ Metadata:
 
         public override string ToString()
         {
-            return $"Name: {Name}, CollectionType: {CollectionType.Name}, ItemType: {ItemType.Name}, IsRequired: {IsRequired}";
+            return
+                $"Name: {Name}, CollectionType: {CollectionType.Name}, ItemType: {ItemType.Name}, IsRequired: {IsRequired}";
         }
     }
 
     public class Schema : List<Metadata>
     {
         public bool Contains(string name) => this.Any(m => m.Name == name);
+        public bool Contains(Type type) => this.Any(m => m.Type == type);
+
+        public Metadata? GetMetadataByType(Type? type)
+        {
+            if (type is null) return null;
+            return this.FirstOrDefault(m => m.Name == type.Name);
+        }
 
         public override string ToString()
         {
@@ -282,6 +386,4 @@ Metadata:
             }) ?? new Schema();
         }
     }
-
-
 }

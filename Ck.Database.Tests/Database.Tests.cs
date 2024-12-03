@@ -10,11 +10,11 @@ public class Database_Tests: IClassFixture<DatabaseFixture>
     }
 
     [Fact]
-    public void TestDatabase_Load()
+    public async void TestDatabase_Load()
     {
         var database = _fixture.Database;
 
-        var foos = database.FindAll<Foo>();
+        var foos = await database.FindAll<Foo>();
         var foo = foos.FirstOrDefault();
 
         Assert.NotNull(foo);
