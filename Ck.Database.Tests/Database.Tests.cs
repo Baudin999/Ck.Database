@@ -20,4 +20,7 @@ public class Database_Tests: IClassFixture<DatabaseFixture>
         Assert.NotNull(foo);
         Assert.Equal(3, foo.Somethings.Count);
     }
+
 }
+
+

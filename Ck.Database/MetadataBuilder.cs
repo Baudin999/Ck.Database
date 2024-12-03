@@ -12,6 +12,13 @@ namespace Ck.Database
         public static Schema BuildSchema(Type t, Schema existingSchema = null)
         {
             var schema = existingSchema ?? new Schema();
+            
+            // Check if the type is a runtime type
+            if (t.IsGenericType && t.FullName == null)
+            {
+                // Break out if it's an anonymous or runtime-generated type
+                return schema;
+            }
 
             if (schema.Contains(t.Name))
             {
@@ -21,6 +28,9 @@ namespace Ck.Database
 
             // Create metadata for the type
             var metadata = new Metadata { Name = t.Name };
+            
+            // Add this type's metadata to the schema
+            schema.Add(metadata);
 
             foreach (var memberInfo in t.GetMembers(BindingFlags.Public | BindingFlags.Instance))
             {
@@ -33,9 +43,7 @@ namespace Ck.Database
                     HandleProperty((PropertyInfo)memberInfo, metadata, schema);
                 }
             }
-
-            // Add this type's metadata to the schema
-            schema.Add(metadata);
+            
             return schema;
         }
 

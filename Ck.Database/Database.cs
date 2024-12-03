@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -9,13 +10,14 @@ using Newtonsoft.Json.Serialization;
 
 namespace Ck.Database
 {
-    public class Database
+    public class Database : IDisposable
     {
         private readonly string _databasePath;
         private readonly IdFarm _idFarm;
         private readonly Dictionary<string, object> _collections;
         private Schema _schema;
         private Dictionary<string, Metadata> _metadataDict;
+        public HashSet<int> _loadedIds = new HashSet<int>();
 
         public Database(string databasePath)
         {
@@ -30,6 +32,17 @@ namespace Ck.Database
 
         public void Store<T>(T entity)
         {
+            var processedEntities = new HashSet<object>();
+            Store(entity, processedEntities);
+        }
+
+        private void Store<T>(T entity, HashSet<object> processedEntities)
+        {
+            if (entity == null || processedEntities.Contains(entity))
+                return;
+
+            processedEntities.Add(entity);
+
             var type = typeof(T);
             var typeName = type.Name;
             ValidateType<T>(typeName, type);
@@ -56,12 +69,11 @@ namespace Ck.Database
             }
 
             // Store referenced entities
-            StoreReferencedEntities(entity, metadata);
+            StoreReferencedEntities(entity, metadata, processedEntities);
 
             collection.Add(entity);
             SaveCollection(collection, typeName);
         }
-
         public T Find<T>(int id)
         {
             var type = typeof(T);
@@ -85,6 +97,7 @@ namespace Ck.Database
 
         public List<T> FindAll<T>()
         {
+
             var type = typeof(T);
             var typeName = type.Name;
             ValidateType<T>(typeName, type);
@@ -116,8 +129,12 @@ namespace Ck.Database
             {
                 collection.Remove(entity);
                 SaveCollection(collection, typeName);
+
+                // Remove the ID from the loaded IDs set
+                _loadedIds.Remove(id);
             }
         }
+
 
         private List<T> GetOrCreateCollection<T>(string typeName)
         {
@@ -153,17 +170,19 @@ namespace Ck.Database
             File.WriteAllText(filePath, json);
         }
 
-        private void StoreReferencedEntities(object entity, Metadata metadata)
+        private void StoreReferencedEntities(object entity, Metadata metadata, HashSet<object> processedEntities)
         {
             // Store reference fields
             foreach (var refField in metadata.ReferenceFields)
             {
                 var memberInfo = GetMemberInfo(entity.GetType(), refField.Name);
                 var value = GetMemberValue(entity, memberInfo);
-                if (value != null)
+                if (value != null && !processedEntities.Contains(value))
                 {
-                    var method = typeof(Database).GetMethod(nameof(Store)).MakeGenericMethod(refField.Type);
-                    method.Invoke(this, new[] { value });
+                    var method = typeof(Database)
+                        .GetMethod(nameof(Store), BindingFlags.NonPublic | BindingFlags.Instance)
+                        .MakeGenericMethod(refField.Type);
+                    method.Invoke(this, new object[] { value, processedEntities });
                 }
             }
 
@@ -176,16 +195,33 @@ namespace Ck.Database
                 {
                     foreach (var item in value)
                     {
-                        var method = typeof(Database).GetMethod(nameof(Store)).MakeGenericMethod(colRef.ItemType);
-                        method.Invoke(this, new[] { item });
+                        if (item != null && !processedEntities.Contains(item))
+                        {
+                            var method = typeof(Database)
+                                .GetMethod(nameof(Store), BindingFlags.NonPublic | BindingFlags.Instance)
+                                .MakeGenericMethod(colRef.ItemType);
+                            method.Invoke(this, new object[] { item, processedEntities });
+                        }
                     }
                 }
             }
         }
 
-        // Database.cs - Adjusted ResolveEntityReferences method
+
         private void ResolveEntityReferences(object entity, Metadata metadata)
         {
+            var idMember = GetIdMember(entity.GetType());
+            int entityId = GetIdValue(entity, idMember);
+
+            if (_loadedIds.Contains(entityId))
+            {
+                return;
+            }
+            else
+            {
+                _loadedIds.Add(entityId);
+            }
+
             // Resolve reference fields
             foreach (var refField in metadata.ReferenceFields)
             {
@@ -194,8 +230,8 @@ namespace Ck.Database
 
                 if (referenceValue != null)
                 {
-                    var idMember = GetIdMember(referenceValue.GetType());
-                    int refId = GetIdValue(referenceValue, idMember);
+                    var idMemberRef = GetIdMember(refField.Type);
+                    int refId = GetIdValue(referenceValue, idMemberRef);
 
                     var method = typeof(Database).GetMethod(nameof(Find)).MakeGenericMethod(refField.Type);
                     var referencedEntity = method.Invoke(this, new object[] { refId });
@@ -220,8 +256,8 @@ namespace Ck.Database
                     {
                         if (item != null)
                         {
-                            var idMember = GetIdMember(item.GetType());
-                            int itemId = GetIdValue(item, idMember);
+                            var idMemberItem = GetIdMember(colRef.ItemType);
+                            int itemId = GetIdValue(item, idMemberItem);
 
                             var resolvedItem = method.Invoke(this, new object[] { itemId });
                             resolvedList.Add(resolvedItem);
@@ -313,11 +349,23 @@ namespace Ck.Database
         {
             if (!_metadataDict.ContainsKey(typeName))
             {
-                _ = MetadataBuilder.BuildSchema(type, _schema);
+                _schema = MetadataBuilder.BuildSchema(type, _schema);
                 _metadataDict = _schema.ToDictionary(m => m.Name);
 
                 _schema.SaveToJson(_databasePath);
             }
+        }
+
+        public void Close()
+        {
+            _schema.SaveToJson(_databasePath);
+            _collections.Clear();
+            _metadataDict.Clear();
+        }
+
+        public void Dispose()
+        {
+            Close();
         }
     }
 
