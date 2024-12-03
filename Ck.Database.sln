@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ck.Database", "Ck.Database\Ck.Database.csproj", "{D3493680-2FAF-474D-98D1-93F6076C6346}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ck.Database.Tests", "Ck.Database.Tests\Ck.Database.Tests.csproj", "{AA484230-21DB-4DAD-87F0-C3D0025FEBF3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ck.Database.Runner", "Ck.Database.Runner\Ck.Database.Runner.csproj", "{270FA0F9-24EB-4BE8-8C66-6BD77CA802BD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D3493680-2FAF-474D-98D1-93F6076C6346}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D3493680-2FAF-474D-98D1-93F6076C6346}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D3493680-2FAF-474D-98D1-93F6076C6346}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D3493680-2FAF-474D-98D1-93F6076C6346}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AA484230-21DB-4DAD-87F0-C3D0025FEBF3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AA484230-21DB-4DAD-87F0-C3D0025FEBF3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AA484230-21DB-4DAD-87F0-C3D0025FEBF3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AA484230-21DB-4DAD-87F0-C3D0025FEBF3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{270FA0F9-24EB-4BE8-8C66-6BD77CA802BD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{270FA0F9-24EB-4BE8-8C66-6BD77CA802BD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{270FA0F9-24EB-4BE8-8C66-6BD77CA802BD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{270FA0F9-24EB-4BE8-8C66-6BD77CA802BD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
