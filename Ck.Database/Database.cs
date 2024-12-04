@@ -10,580 +10,250 @@ using Newtonsoft.Json.Serialization;
 
 namespace Ck.Database
 {
-    public class Database : IDisposable
+   public class Database : IDisposable
+{
+    private readonly string _databasePath;
+    private readonly IdFarm _idFarm;
+    private readonly Dictionary<string, object> _collections;
+    private Schema _schema;
+    private HashSet<int> _processedEntities = new HashSet<int>();
+
+    public Database(string databasePath)
     {
-        private readonly string _databasePath;
-        private readonly IdFarm _idFarm;
-        private readonly Dictionary<string, object> _collections;
-        private readonly HashSet<int> _loadedIds = [];
-        private Schema _schema;
+        _databasePath = databasePath;
+        if (!Directory.Exists(_databasePath)) Directory.CreateDirectory(_databasePath);
 
-        public Database(string databasePath)
+        _idFarm = new IdFarm(databasePath);
+        _collections = new Dictionary<string, object>();
+        _schema = Schema.LoadFromJson(_databasePath);
+    }
+
+    public void Store<T>(T entity)
+    {
+        var processedEntities = new HashSet<object>();
+        StoreEntity(entity, processedEntities);
+    }
+
+    private void StoreEntity<T>(T entity, HashSet<object> processedEntities)
+    {
+        if (entity == null || processedEntities.Contains(entity))
+            return;
+
+        processedEntities.Add(entity);
+
+        var type = typeof(T);
+        var metadata = ValidateType(type);
+        var typeName = metadata.Name;
+
+        var collection = GetOrCreateCollection<T>();
+
+        // Assign Id if necessary
+        int id = metadata.GetId(entity);
+        if (id <= 0)
         {
-            _databasePath = databasePath;
-            if (!Directory.Exists(_databasePath)) Directory.CreateDirectory(_databasePath);
-
-            _idFarm = new IdFarm(databasePath);
-            _collections = new Dictionary<string, object>();
-            _schema = Schema.LoadFromJson(_databasePath);
+            id = _idFarm.GetNextId();
+            metadata.SetId(entity, id);
+        }
+        else
+        {
+            // Remove existing entity with the same Id
+            collection.Remove(id);
         }
 
-        public void Store<T>(T entity)
+        // Store referenced entities
+        StoreReferencedEntities(entity, metadata, processedEntities);
+
+        collection.Add(entity);
+        collection.Save();
+    }
+
+    private void StoreReferencedEntities(object entity, Metadata metadata, HashSet<object> processedEntities)
+    {
+        // Store reference fields
+        foreach (var refField in metadata.ReferenceFields)
         {
-            var processedEntities = new HashSet<object>();
-            Store(entity, processedEntities);
-        }
-
-        private async void Store<T>(T entity, HashSet<object> processedEntities)
-        {
-            if (entity == null || processedEntities.Contains(entity))
-                return;
-
-            processedEntities.Add(entity);
-
-            var type = typeof(T);
-            var metadata = ValidateType<T>(type);
-            var typeName = metadata.Name;
-
-            var collection = await GetOrCreateCollection<T>(typeName);
-
-            // Assign Id if necessary
-            //var idMember = GetIdMember(typeof(T));
-            int id = metadata.GetId(entity);
-            if (id <= 0)
+            var value = metadata.GetMemberValue(entity, refField.Name);
+            if (value != null && !processedEntities.Contains(value))
             {
-                id = _idFarm.GetNextId();
-                metadata.SetId(entity, id);
+                var method = typeof(Database)
+                    .GetMethod(nameof(StoreEntity), BindingFlags.NonPublic | BindingFlags.Instance)
+                    .MakeGenericMethod(refField.Type);
+                method.Invoke(this, new object[] { value, processedEntities });
             }
-            else
+        }
+
+        // Store collection references
+        foreach (var colRef in metadata.CollectionReferences)
+        {
+            var value = metadata.GetMemberValue(entity, colRef.Name) as IEnumerable;
+            if (value != null)
             {
-                // Remove existing entity with the same Id
-                var existingEntity = collection.FirstOrDefault(e => metadata.GetId(e) == id);
-                if (existingEntity != null)
+                foreach (var item in value)
                 {
-                    collection.Remove(existingEntity);
-                }
-            }
-
-            // Store referenced entities
-            StoreReferencedEntities(entity, metadata, processedEntities);
-
-            collection.Add(entity);
-            SaveCollection(collection, typeName);
-        }
-
-        public async Task<T> Find<T>(int id)
-        {
-            var type = typeof(T);
-            var metadata = ValidateType<T>(type);
-            var typeName = metadata.Name;
-
-            var collection = await GetOrCreateCollection<T>(typeName);
-
-            var idMember = GetIdMember(typeof(T));
-            var entity = collection.FirstOrDefault(e => GetIdValue(e, idMember) == id);
-
-            if (entity != null)
-            {
-                ResolveEntityReferences(entity, metadata);
-            }
-
-            return entity;
-        }
-
-        public async Task<List<T>> FindAll<T>()
-        {
-            var type = typeof(T);
-            var metadata = ValidateType<T>(type);
-            var typeName = metadata.Name;
-
-            var collection = await GetOrCreateCollection<T>(typeName);
-
-            // Resolve references for all entities
-            foreach (var entity in collection)
-            {
-                ResolveEntityReferences(entity, metadata);
-            }
-
-            return collection.ToList();
-        }
-
-        public async void Delete<T>(int id)
-        {
-            var type = typeof(T);
-            var metadata = ValidateType<T>(type);
-            var typeName = metadata.Name;
-
-            var collection = await GetOrCreateCollection<T>(typeName);
-
-            var idMember = GetIdMember(typeof(T));
-            var entity = collection.FirstOrDefault(e => GetIdValue(e, idMember) == id);
-
-            if (entity != null)
-            {
-                collection.Remove(entity);
-                SaveCollection(collection, typeName);
-
-                // Remove the ID from the loaded IDs set
-                _loadedIds.Remove(id);
-            }
-        }
-
-
-        private async Task<List<T>> GetOrCreateCollection<T>(string typeName)
-        {
-            if (!_collections.TryGetValue(typeName, out var collectionObj))
-            {
-                string filePath = Path.Combine(_databasePath, $"{typeName}.json");
-                List<T> collection;
-                if (File.Exists(filePath))
-                {
-                    var json = await File.ReadAllTextAsync(filePath);
-                    var settings = GetJsonSettings();
-                    collection = JsonConvert.DeserializeObject<List<T>>(json, settings);
-                }
-                else
-                {
-                    collection = new List<T>();
-                }
-
-                _collections[typeName] = collection;
-                return collection;
-            }
-            else
-            {
-                return (List<T>)collectionObj;
-            }
-        }
-
-        private void SaveCollection<T>(List<T> collection, string typeName)
-        {
-            string filePath = Path.Combine(_databasePath, $"{typeName}.json");
-            var settings = GetJsonSettings();
-            var json = JsonConvert.SerializeObject(collection, Formatting.Indented, settings);
-            File.WriteAllText(filePath, json);
-        }
-
-        private void StoreReferencedEntities(object entity, Metadata metadata, HashSet<object> processedEntities)
-        {
-            // Store reference fields
-            foreach (var refField in metadata.ReferenceFields)
-            {
-                var memberInfo = GetMemberInfo(entity.GetType(), refField.Name);
-                var value = GetMemberValue(entity, memberInfo);
-                if (value != null && !processedEntities.Contains(value))
-                {
-                    var method = typeof(Database)
-                        .GetMethod(nameof(Store), BindingFlags.NonPublic | BindingFlags.Instance)
-                        .MakeGenericMethod(refField.Type);
-                    method.Invoke(this, new object[] { value, processedEntities });
-                }
-            }
-
-            // Store collection references
-            foreach (var colRef in metadata.CollectionReferences)
-            {
-                var memberInfo = GetMemberInfo(entity.GetType(), colRef.Name);
-                var value = GetMemberValue(entity, memberInfo) as IEnumerable;
-                if (value != null)
-                {
-                    foreach (var item in value)
+                    if (item != null && !processedEntities.Contains(item))
                     {
-                        if (item != null && !processedEntities.Contains(item))
-                        {
-                            var method = typeof(Database)
-                                .GetMethod(nameof(Store), BindingFlags.NonPublic | BindingFlags.Instance)
-                                .MakeGenericMethod(colRef.ItemType);
-                            method.Invoke(this, new object[] { item, processedEntities });
-                        }
+                        var method = typeof(Database)
+                            .GetMethod(nameof(StoreEntity), BindingFlags.NonPublic | BindingFlags.Instance)
+                            .MakeGenericMethod(colRef.ItemType);
+                        method.Invoke(this, new object[] { item, processedEntities });
                     }
                 }
             }
         }
+    }
 
-
-        private async void ResolveEntityReferences(object entity, Metadata metadata)
+    public T Find<T>(int id)
+    {
+        var collection = GetOrCreateCollection<T>();
+        var entity = collection.Find(id);
+        if (entity != null && !_processedEntities.Contains(id))
         {
-            var idMember = GetIdMember(entity.GetType());
-            int entityId = GetIdValue(entity, idMember);
+            var metadata = ValidateType(typeof(T));
+            ResolveEntityReferences(entity, metadata);
+        }
+        return entity;
+    }
 
-            if (_loadedIds.Contains(entityId))
+    private void ResolveEntityReferences(object entity, Metadata metadata)
+    {
+        ResolveEntityReferencesRecursive(entity, metadata);
+    }
+
+    private void ResolveEntityReferencesRecursive(object entity, Metadata metadata)
+    {
+        var id = metadata.GetId(entity);
+        if (entity == null || _processedEntities.Contains(id))
+            return;
+
+        _processedEntities.Add(id);
+
+        // Resolve reference fields
+        foreach (var refField in metadata.ReferenceFields)
+        {
+            var value = metadata.GetMemberValue(entity, refField.Name);
+            if (value != null)
             {
-                return;
+                var refmetadata = _schema.GetMetadataByType(refField.Type);
+                refmetadata.Validate();
+                int refId = refmetadata.GetId(value);
+
+                var method = typeof(Database)
+                    .GetMethod(nameof(Find))
+                    .MakeGenericMethod(refField.Type);
+                var referencedEntity = method.Invoke(this, new object[] { refId });
+
+                metadata.SetMemberValue(entity, refField.Name, referencedEntity);
+
+                // Recursively resolve references
+                var refMetadata = ValidateType(refField.Type);
+                ResolveEntityReferencesRecursive(referencedEntity, refMetadata);
             }
-            else
-            {
-                _loadedIds.Add(entityId);
-            }
+        }
 
-            // Resolve reference fields
-            foreach (var refField in metadata.ReferenceFields)
+        // Resolve collection references
+        foreach (var colRef in metadata.CollectionReferences)
+        {
+            var value = metadata.GetMemberValue(entity, colRef.Name) as IEnumerable;
+            if (value != null)
             {
-                var memberInfo = GetMemberInfo(entity.GetType(), refField.Name);
-                var referenceValue = GetMemberValue(entity, memberInfo);
-
-                if (referenceValue != null)
+                var resolvedListType = typeof(List<>).MakeGenericType(colRef.ItemType);
+                var resolvedList = (IList)Activator.CreateInstance(resolvedListType);
+                var colRefMetadata = _schema.GetMetadataByType(colRef.ItemType);
+                
+                foreach (var item in value)
                 {
-                    var idMemberRef = GetIdMember(refField.Type);
-                    int refId = GetIdValue(referenceValue, idMemberRef);
-
-                    var method = typeof(Database).GetMethod(nameof(Find)).MakeGenericMethod(refField.Type);
-                    var task = (Task)method.Invoke(this, new object[] { refId });
-
-                    // Await the Task to ensure proper handling of the asynchronous operation
-                    await task;
-
-                    // If the method has a return type, you need to get the result from the Task
-                    var resultProperty = task.GetType().GetProperty("Result");
-                    var referencedEntity = resultProperty?.GetValue(task);
-
-                    // Set the value to the member
-                    SetMemberValue(entity, memberInfo, referencedEntity);
-                }
-            }
-
-            foreach (var colRef in metadata.CollectionReferences)
-            {
-                var memberInfo = GetMemberInfo(entity.GetType(), colRef.Name);
-                var collectionValue = GetMemberValue(entity, memberInfo) as IEnumerable;
-
-                if (collectionValue != null)
-                {
-                    var resolvedListType = typeof(List<>).MakeGenericType(colRef.ItemType);
-                    var resolvedList = (IList)Activator.CreateInstance(resolvedListType);
-
-                    var method = typeof(Database).GetMethod(nameof(Find)).MakeGenericMethod(colRef.ItemType);
-
-                    foreach (var item in collectionValue)
+                    if (item != null)
                     {
-                        if (item != null)
-                        {
-                            var idMemberItem = GetIdMember(colRef.ItemType);
-                            int itemId = GetIdValue(item, idMemberItem);
+                        int itemId = colRefMetadata.GetId(item);
 
-                            // Invoke the method and await the Task result
-                            var task = (Task)method.Invoke(this, new object[] { itemId });
-                            await task; // Ensure the task completes
+                        var method = typeof(Database)
+                            .GetMethod(nameof(Find))
+                            .MakeGenericMethod(colRef.ItemType);
+                        var resolvedItem = method.Invoke(this, new object[] { itemId });
+                        
+                        resolvedList.Add(resolvedItem);
 
-                            // Retrieve the resolved item from the Task's result
-                            var resultProperty = task.GetType().GetProperty("Result");
-                            var resolvedItem = resultProperty?.GetValue(task);
-
-                            resolvedList.Add(resolvedItem);
-                        }
+                        // Recursively resolve references
+                        var itemMetadata = ValidateType(colRef.ItemType);
+                        ResolveEntityReferencesRecursive(resolvedItem, itemMetadata);
                     }
-
-                    SetMemberValue(entity, memberInfo, resolvedList);
                 }
-            }
 
-        }
-
-        private MemberInfo? GetMemberInfo(Type type, string memberName)
-        {
-            return type.GetMember(memberName, BindingFlags.Public | BindingFlags.Instance).FirstOrDefault();
-        }
-
-        private object? GetMemberValue(object obj, MemberInfo member)
-        {
-            return member switch
-            {
-                FieldInfo field => field.GetValue(obj),
-                PropertyInfo prop => prop.GetValue(obj),
-                _ => null,
-            };
-        }
-
-        private void SetMemberValue(object obj, MemberInfo member, object value)
-        {
-            switch (member)
-            {
-                case FieldInfo field:
-                    field.SetValue(obj, value);
-                    break;
-                case PropertyInfo prop:
-                    if (prop.CanWrite)
-                        prop.SetValue(obj, value);
-                    break;
+                metadata.SetMemberValue(entity, colRef.Name, resolvedList);
             }
         }
+    }
 
-        private MemberInfo GetIdMember(Type type)
+    public List<T> FindAll<T>()
+    {
+        var collection = GetOrCreateCollection<T>();
+        var entities = collection.FindAll();
+
+        var metadata = ValidateType(typeof(T));
+        foreach (var entity in entities)
         {
-            var idMember = type.GetMember("Id", BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m => (m.MemberType == MemberTypes.Field && ((FieldInfo)m).FieldType == typeof(int))
-                                     || (m.MemberType == MemberTypes.Property &&
-                                         ((PropertyInfo)m).PropertyType == typeof(int)));
-            if (idMember == null)
-                throw new InvalidOperationException(
-                    $"Type {type.Name} does not have an Id field or property of type int.");
-
-            return idMember;
+            ResolveEntityReferences(entity, metadata);
         }
 
-        private int GetIdValue(object entity, MemberInfo idMember)
-        {
-            return idMember switch
-            {
-                PropertyInfo prop => (int)prop.GetValue(entity),
-                FieldInfo field => (int)field.GetValue(entity),
-                _ => throw new InvalidOperationException("Id member is neither a field nor a property."),
-            };
-        }
+        return entities;
+    }
 
-        private void SetIdValue(object entity, MemberInfo idMember, int value)
-        {
-            switch (idMember)
-            {
-                case PropertyInfo prop:
-                    prop.SetValue(entity, value);
-                    break;
-                case FieldInfo field:
-                    field.SetValue(entity, value);
-                    break;
-                default:
-                    throw new InvalidOperationException("Id member is neither a field nor a property.");
-            }
-        }
+    public void Delete<T>(int id)
+    {
+        var collection = GetOrCreateCollection<T>();
+        collection.Remove(id);
+        collection.Save();
+    }
 
-        private JsonSerializerSettings GetJsonSettings()
-        {
-            return new JsonSerializerSettings
-            {
-                Formatting = Formatting.Indented,
-                ContractResolver = new MetadataContractResolver(_schema)
-            };
-        }
+    private Collection<T> GetOrCreateCollection<T>()
+    {
+        var type = typeof(T);
+        var typeName = type.Name;
 
-        private Metadata ValidateType<T>(Type type)
+        if (!_collections.TryGetValue(typeName, out var collectionObj))
         {
+            // Ensure metadata exists for type T
             if (!_schema.Contains(type))
             {
                 _schema = MetadataBuilder.BuildSchema(type, _schema);
                 _schema.SaveToJson(_databasePath);
             }
 
-            return _schema.GetMetadataByType(type);
-        }
+            var metadata = _schema.GetMetadataByType(type);
+            string filePath = Path.Combine(_databasePath, $"{typeName}.json");
 
-        public void Close()
+            var collection = new Collection<T>(_schema, _idFarm);
+            _collections[typeName] = collection;
+            return collection;
+        }
+        else
         {
+            return (Collection<T>)collectionObj;
+        }
+    }
+
+    private Metadata ValidateType(Type type)
+    {
+        if (!_schema.Contains(type))
+        {
+            _schema = MetadataBuilder.BuildSchema(type, _schema);
             _schema.SaveToJson(_databasePath);
-            _collections.Clear();
         }
 
-        public void Dispose()
-        {
-            Close();
-        }
+        return _schema.GetMetadataByType(type);
     }
 
-    public class MetadataContractResolver : DefaultContractResolver
+    public void Dispose()
     {
-        private readonly Schema _schema;
-
-        public MetadataContractResolver(Schema schema)
+        foreach (var collectionObj in _collections.Values)
         {
-            _schema = schema;
+            var collectionType = collectionObj.GetType();
+            var saveMethod = collectionType.GetMethod("Save");
+            saveMethod.Invoke(collectionObj, null);
         }
-
-        protected override JsonProperty CreateProperty(MemberInfo member, MemberSerialization memberSerialization)
-        {
-            var jsonProperty = base.CreateProperty(member, memberSerialization);
-            var metadata = _schema.GetMetadataByType(member.DeclaringType);
-            if (metadata is not null)
-            {
-                // Handle reference fields
-                if (metadata.ReferenceFields.Any(f => f.Name == member.Name))
-                {
-                    jsonProperty.ShouldSerialize = instance => true;
-                    jsonProperty.Converter = new ReferenceFieldConverter();
-                }
-
-                // Handle collection references
-                else if (metadata.CollectionReferences.Any(f => f.Name == member.Name))
-                {
-                    jsonProperty.ShouldSerialize = instance => true;
-                    jsonProperty.Converter = new CollectionReferenceConverter();
-                }
-            }
-
-            return jsonProperty;
-        }
+        _schema.SaveToJson(_databasePath);
     }
-
-    // ReferenceFieldConverter.cs
-    public class ReferenceFieldConverter : JsonConverter
-    {
-        public override bool CanConvert(Type objectType)
-        {
-            // This converter is only for reference fields
-            return true;
-        }
-
-        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
-        {
-            // Serialize reference fields as Ids
-            if (value != null)
-            {
-                var idMember = value.GetType().GetMember("Id", BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(m => (m.MemberType == MemberTypes.Field && ((FieldInfo)m).FieldType == typeof(int))
-                                         || (m.MemberType == MemberTypes.Property &&
-                                             ((PropertyInfo)m).PropertyType == typeof(int)));
-
-                if (idMember != null)
-                {
-                    var idValue = idMember.MemberType == MemberTypes.Field
-                        ? ((FieldInfo)idMember).GetValue(value)
-                        : ((PropertyInfo)idMember).GetValue(value);
-
-                    writer.WriteValue(idValue);
-                }
-                else
-                {
-                    writer.WriteNull();
-                }
-            }
-            else
-            {
-                writer.WriteNull();
-            }
-        }
-
-        public override object ReadJson(JsonReader reader, Type objectType, object existingValue,
-            JsonSerializer serializer)
-        {
-            // Create a placeholder object with only the Id set
-            if (reader.TokenType == JsonToken.Integer)
-            {
-                int id = Convert.ToInt32(reader.Value);
-
-                var placeholder = Activator.CreateInstance(objectType);
-                var idMember = objectType.GetMember("Id", BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(m => (m.MemberType == MemberTypes.Field && ((FieldInfo)m).FieldType == typeof(int))
-                                         || (m.MemberType == MemberTypes.Property &&
-                                             ((PropertyInfo)m).PropertyType == typeof(int)));
-
-                if (idMember != null)
-                {
-                    if (idMember.MemberType == MemberTypes.Field)
-                        ((FieldInfo)idMember).SetValue(placeholder, id);
-                    else
-                        ((PropertyInfo)idMember).SetValue(placeholder, id);
-                }
-
-                return placeholder;
-            }
-            else
-            {
-                return null;
-            }
-        }
-    }
+}
 
 
-    // CollectionReferenceConverter.cs
-    public class CollectionReferenceConverter : JsonConverter
-    {
-        public override bool CanConvert(Type objectType)
-        {
-            // This converter is only for collection references
-            return true;
-        }
-
-        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
-        {
-            // Serialize collection references as arrays of Ids
-            var enumerable = value as IEnumerable;
-            if (enumerable != null)
-            {
-                writer.WriteStartArray();
-                foreach (var item in enumerable)
-                {
-                    if (item != null)
-                    {
-                        var idMember = item.GetType().GetMember("Id", BindingFlags.Public | BindingFlags.Instance)
-                            .FirstOrDefault(m =>
-                                (m.MemberType == MemberTypes.Field && ((FieldInfo)m).FieldType == typeof(int))
-                                || (m.MemberType == MemberTypes.Property &&
-                                    ((PropertyInfo)m).PropertyType == typeof(int)));
-
-                        if (idMember != null)
-                        {
-                            var idValue = idMember.MemberType == MemberTypes.Field
-                                ? ((FieldInfo)idMember).GetValue(item)
-                                : ((PropertyInfo)idMember).GetValue(item);
-
-                            writer.WriteValue(idValue);
-                        }
-                        else
-                        {
-                            writer.WriteNull();
-                        }
-                    }
-                    else
-                    {
-                        writer.WriteNull();
-                    }
-                }
-
-                writer.WriteEndArray();
-            }
-            else
-            {
-                writer.WriteNull();
-            }
-        }
-
-        public override object ReadJson(JsonReader reader, Type objectType, object existingValue,
-            JsonSerializer serializer)
-        {
-            // Create a list of placeholder objects with only the Ids set
-            if (reader.TokenType == JsonToken.StartArray)
-            {
-                var listType = typeof(List<>).MakeGenericType(objectType.GetGenericArguments()[0]);
-                var list = (IList)Activator.CreateInstance(listType);
-
-                var elementType = objectType.GetGenericArguments()[0];
-
-                while (reader.Read())
-                {
-                    if (reader.TokenType == JsonToken.EndArray)
-                        break;
-
-                    if (reader.TokenType == JsonToken.Integer)
-                    {
-                        int id = Convert.ToInt32(reader.Value);
-
-                        var placeholder = Activator.CreateInstance(elementType);
-                        var idMember = elementType.GetMember("Id", BindingFlags.Public | BindingFlags.Instance)
-                            .FirstOrDefault(m =>
-                                (m.MemberType == MemberTypes.Field && ((FieldInfo)m).FieldType == typeof(int))
-                                || (m.MemberType == MemberTypes.Property &&
-                                    ((PropertyInfo)m).PropertyType == typeof(int)));
-
-                        if (idMember != null)
-                        {
-                            if (idMember.MemberType == MemberTypes.Field)
-                                ((FieldInfo)idMember).SetValue(placeholder, id);
-                            else
-                                ((PropertyInfo)idMember).SetValue(placeholder, id);
-                        }
-
-                        list.Add(placeholder);
-                    }
-                    else
-                    {
-                        list.Add(null);
-                    }
-                }
-
-                return list;
-            }
-            else
-            {
-                return null;
-            }
-        }
-    }
 }

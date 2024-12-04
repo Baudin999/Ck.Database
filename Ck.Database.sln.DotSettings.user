@@ -8,6 +8,8 @@
     &lt;ProjectFile&gt;AA484230-21DB-4DAD-87F0-C3D0025FEBF3/f:Database.Tests.cs&lt;/ProjectFile&gt;&#xD;
     &lt;TestAncestor&gt;&#xD;
       &lt;TestId&gt;xUnit::AA484230-21DB-4DAD-87F0-C3D0025FEBF3::net8.0::Ck.Database.Tests.TestAuthors.StoreAutors&lt;/TestId&gt;&#xD;
+      &lt;TestId&gt;xUnit::AA484230-21DB-4DAD-87F0-C3D0025FEBF3::net8.0::Ck.Database.Tests.LargeAuthorTests&lt;/TestId&gt;&#xD;
+      &lt;TestId&gt;xUnit::AA484230-21DB-4DAD-87F0-C3D0025FEBF3::net8.0::Ck.Database.Tests.DatabaseEngineTests&lt;/TestId&gt;&#xD;
     &lt;/TestAncestor&gt;&#xD;
   &lt;/Or&gt;&#xD;
 &lt;/SessionState&gt;</s:String></wpf:ResourceDictionary>

@@ -1,141 +1,91 @@
-﻿using System;
-using System.Collections;
+﻿
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
+using System.Linq;
 using Newtonsoft.Json;
 
 namespace Ck.Database
 {
-    public class Collection<T> : ICollectionBase
+    public class Collection<T>
     {
+        private readonly Schema _schema;
+        private readonly Metadata _metadata;
+        private readonly Dictionary<int, T> _entities;
         private readonly string _filePath;
-        private readonly List<T> _items;
         private readonly IdFarm _idFarm;
-        private readonly Database _database;
 
-        public Collection(string databasePath, IdFarm idFarm, Database database)
+        public Collection(Schema schema, IdFarm idFarm)
         {
-            var collectionFileName = $"{typeof(T).Name}.json";
-            _filePath = Path.Combine(databasePath, collectionFileName);
-            _items = new List<T>();
+            var typeName = typeof(T).Name;
+            _filePath =  Path.Combine(schema.DatabasePath, $"{typeName}.json");
+            _schema = schema;
+            _metadata = _schema.GetMetadataByType(typeof(T));
             _idFarm = idFarm;
-            _database = database;
+            _entities = new Dictionary<int, T>();
+
+            Load(); // Load existing entities from file
         }
 
-        // ICollectionBase implementation
-        public void Add(object item)
+        public void Add(T entity)
         {
-            if (item is T typedItem && !_items.Contains(typedItem))
+            int id = _metadata.GetId(entity);
+
+            if (id <= 0)
             {
-                _items.Add(typedItem);
+                id = _idFarm.GetNextId();
+                _metadata.SetId(entity, id);
             }
+
+            _entities[id] = entity;
         }
 
-        public void Remove(object item)
+        public void Remove(int id)
         {
-            if (item is T typedItem)
-            {
-                _items.Remove(typedItem);
-            }
+            _entities.Remove(id);
         }
 
-        public void RemoveById(int id)
+        public T Find(int id)
         {
-            var item = FindById(id);
-            if (item != null)
-            {
-                _items.Remove((T)item);
-            }
+            _entities.TryGetValue(id, out var entity);
+            return entity;
         }
 
-        public object FindById(int id)
+        public List<T> FindAll()
         {
-            foreach (var item in _items)
-            {
-                var idValue = GetIdValue(item);
-                if (idValue == id)
-                {
-                    return item;
-                }
-            }
-            return null;
-        }
-
-        public IEnumerable GetAll()
-        {
-            return _items;
-        }
-
-        public void Load()
-        {
-            if (File.Exists(_filePath))
-            {
-                var content = File.ReadAllText(_filePath);
-                var loadedItems = JsonConvert.DeserializeObject<List<T>>(content);
-                if (loadedItems != null)
-                {
-                    _items.Clear();
-                    _items.AddRange(loadedItems);
-                }
-            }
+            return _entities.Values.ToList();
         }
 
         public void Save()
         {
-            var content = JsonConvert.SerializeObject(_items, Formatting.Indented);
-            File.WriteAllText(_filePath, content);
-        }
-
-        // Original methods
-        public void Add(T item)
-        {
-            if (!_items.Contains(item))
+            var settings = new JsonSerializerSettings
             {
-                _items.Add(item);
-            }
+                Formatting = Formatting.Indented,
+                ContractResolver = new MetadataContractResolver(_schema)
+            };
+            var json = JsonConvert.SerializeObject(_entities.Values.ToList(), settings);
+            File.WriteAllText(_filePath, json);
         }
 
-        public void Remove(T item)
+        private void Load()
         {
-            _items.Remove(item);
-        }
-
-        public T FindByIdTyped(int id)
-        {
-            foreach (var item in _items)
+            if (File.Exists(_filePath))
             {
-                var idValue = GetIdValue(item);
-                if (idValue == id)
+                var settings = new JsonSerializerSettings
                 {
-                    return item;
+                    Formatting = Formatting.Indented,
+                    ContractResolver = new MetadataContractResolver(_schema)
+                };
+                var json = File.ReadAllText(_filePath);
+                var entities = JsonConvert.DeserializeObject<List<T>>(json, settings);
+                foreach (var entity in entities)
+                {
+                    int id = _metadata.GetId(entity);
+                    if (id > 0)
+                    {
+                        _entities[id] = entity;
+                    }
                 }
             }
-            return default;
-        }
-
-        public IEnumerable<T> GetAllTyped()
-        {
-            return _items;
-        }
-
-        private int GetIdValue(T item)
-        {
-            var type = typeof(T);
-            var idField = type.GetField("Id") ?? (MemberInfo)type.GetProperty("Id");
-
-            if (idField != null)
-            {
-                if (idField is FieldInfo fieldInfo)
-                {
-                    return (int)fieldInfo.GetValue(item);
-                }
-                else if (idField is PropertyInfo propertyInfo)
-                {
-                    return (int)propertyInfo.GetValue(item);
-                }
-            }
-            return 0;
         }
     }
 }

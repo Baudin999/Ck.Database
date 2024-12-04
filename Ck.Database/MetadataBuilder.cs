@@ -45,6 +45,9 @@ namespace Ck.Database
                 }
             }
 
+            // Cache getters and setters after building metadata
+            metadata.CacheMemberAccessors();
+
             return schema;
         }
 
@@ -179,97 +182,173 @@ namespace Ck.Database
         public List<MetadataField> Fields = new List<MetadataField>();
         public List<MetadataReferenceField> ReferenceFields = new List<MetadataReferenceField>();
         public List<MetadataCollectionReference> CollectionReferences = new List<MetadataCollectionReference>();
-        public Schema Schema = new Schema();
+        
+        // [JsonIgnore]
+        // public Schema Schema;
 
-        [JsonIgnore] private Func<object, int>? _getIdFunc = null;
-
-        [JsonIgnore] private Action<object, int>? _setIdFunc = null;
+        // Caching member infos and compiled lambdas
+        [JsonIgnore]
+        private readonly Dictionary<string, Func<object, object>> _getters =
+            new Dictionary<string, Func<object, object>>();
 
         [JsonIgnore]
-        public Func<object, int> GetId
+        private readonly Dictionary<string, Action<object, object>> _setters =
+            new Dictionary<string, Action<object, object>>();
+
+        // Id getter and setter
+        [JsonIgnore] private Func<object, int> _getIdFunc = null;
+
+        [JsonIgnore] private Action<object, int> _setIdFunc = null;
+
+        public Metadata()
         {
-            get
+            // Initialize the dictionaries in the constructor
+        }
+
+        public void Validate()
+        {
+            
+        }
+
+        public void CacheMemberAccessors()
+        {
+            
+            // Cache Id getter and setter
+            CacheIdAccessors();
+            
+            // Cache getters and setters for fields
+            foreach (var field in Fields)
             {
-                if (_getIdFunc is not null)
-                    return _getIdFunc;
-                
+                var memberInfo = Type.GetMember(field.Name, BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault();
+                CacheMemberAccessor(memberInfo, field.Name);
+            }
 
-                var idMember = Type.GetMember("Id", BindingFlags.Public | BindingFlags.Instance).FirstOrDefault();
-                if (idMember is PropertyInfo propertyInfo)
-                {
-                    // Create a compiled lambda to get the Id from the property
-                    var parameter = Expression.Parameter(typeof(object), "entity");
-                    var castEntity = Expression.Convert(parameter, Type);
-                    var propertyAccess = Expression.Property(castEntity, propertyInfo);
-                    var lambda = Expression.Lambda<Func<object, int>>(Expression.Convert(propertyAccess, typeof(int)),
-                        parameter);
-                    _getIdFunc = lambda.Compile();
-                }
-                else if (idMember is FieldInfo fieldInfo)
-                {
-                    // Create a compiled lambda to get the Id from the field
-                    var parameter = Expression.Parameter(typeof(object), "entity");
-                    var castEntity = Expression.Convert(parameter, Type);
-                    var fieldAccess = Expression.Field(castEntity, fieldInfo);
-                    var lambda =
-                        Expression.Lambda<Func<object, int>>(Expression.Convert(fieldAccess, typeof(int)), parameter);
-                    _getIdFunc = lambda.Compile();
-                }
+            // Cache getters and setters for reference fields
+            foreach (var refField in ReferenceFields)
+            {
+                var memberInfo = Type.GetMember(refField.Name, BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault();
+                CacheMemberAccessor(memberInfo, refField.Name);
+            }
 
-                if (_getIdFunc is null)
-                {
-                    throw new InvalidOperationException($"Id member not found on type '{Name}'.");
-                }
-
-                return _getIdFunc;
+            // Cache getters and setters for collection references
+            foreach (var colRef in CollectionReferences)
+            {
+                var memberInfo = Type.GetMember(colRef.Name, BindingFlags.Public | BindingFlags.Instance)
+                    .FirstOrDefault();
+                CacheMemberAccessor(memberInfo, colRef.Name);
             }
         }
 
-        [JsonIgnore]
-        public Action<object, int> SetId
+        private void CacheMemberAccessor(MemberInfo memberInfo, string memberName)
         {
-            get
+            if (memberInfo == null) return;
+
+            var parameter = Expression.Parameter(typeof(object), "entity");
+            var castEntity = Expression.Convert(parameter, Type);
+
+            // Getter
+            var getter = Expression.Lambda<Func<object, object>>(
+                Expression.Convert(
+                    memberInfo.MemberType == MemberTypes.Property
+                        ? Expression.Property(castEntity, (PropertyInfo)memberInfo)
+                        : Expression.Field(castEntity, (FieldInfo)memberInfo),
+                    typeof(object)
+                ),
+                parameter
+            ).Compile();
+
+            _getters[memberName] = getter;
+
+            // Setter
+            var valueParameter = Expression.Parameter(typeof(object), "value");
+            var memberAccess = memberInfo.MemberType == MemberTypes.Property
+                ? Expression.Property(castEntity, (PropertyInfo)memberInfo)
+                : Expression.Field(castEntity, (FieldInfo)memberInfo);
+
+            var assign = Expression.Assign(
+                memberAccess,
+                Expression.Convert(valueParameter, memberAccess.Type)
+            );
+
+            var setter = Expression.Lambda<Action<object, object>>(
+                assign,
+                parameter,
+                valueParameter
+            ).Compile();
+
+            _setters[memberName] = setter;
+        }
+
+        private void CacheIdAccessors()
+        {
+            var idMember = Type.GetMember("Id", BindingFlags.Public | BindingFlags.Instance).FirstOrDefault();
+            if (idMember == null)
+                throw new InvalidOperationException($"Id member not found on type '{Name}'.");
+
+            // Getter
+            var parameter = Expression.Parameter(typeof(object), "entity");
+            var castEntity = Expression.Convert(parameter, Type);
+            var memberAccess = idMember.MemberType == MemberTypes.Property
+                ? Expression.Property(castEntity, (PropertyInfo)idMember)
+                : Expression.Field(castEntity, (FieldInfo)idMember);
+
+            _getIdFunc = Expression.Lambda<Func<object, int>>(
+                Expression.Convert(memberAccess, typeof(int)),
+                parameter
+            ).Compile();
+
+            // Setter
+            var valueParameter = Expression.Parameter(typeof(int), "value");
+            var assign = Expression.Assign(
+                memberAccess,
+                Expression.Convert(valueParameter, memberAccess.Type)
+            );
+
+            _setIdFunc = Expression.Lambda<Action<object, int>>(
+                assign,
+                parameter,
+                valueParameter
+            ).Compile();
+        }
+
+        public object GetMemberValue(object entity, string memberName)
+        {
+            if (_getters.TryGetValue(memberName, out var getter))
             {
-                if (_setIdFunc is not null)
-                    return _setIdFunc;
-
-
-                var idMember = Type.GetMember("Id", BindingFlags.Public | BindingFlags.Instance).FirstOrDefault();
-                if (idMember is PropertyInfo propertyInfo)
-                {
-                    if (!propertyInfo.CanWrite)
-                        throw new InvalidOperationException($"Id property on type '{Name}' is read-only.");
-
-                    // Create a compiled lambda to set the Id to the property
-                    var entityParameter = Expression.Parameter(typeof(object), "entity");
-                    var valueParameter = Expression.Parameter(typeof(int), "value");
-                    var castEntity = Expression.Convert(entityParameter, Type);
-                    var propertyAccess = Expression.Property(castEntity, propertyInfo);
-                    var assign = Expression.Assign(propertyAccess,
-                        Expression.Convert(valueParameter, propertyInfo.PropertyType));
-                    var lambda = Expression.Lambda<Action<object, int>>(assign, entityParameter, valueParameter);
-                    _setIdFunc = lambda.Compile();
-                }
-                else if (idMember is FieldInfo fieldInfo)
-                {
-                    // Create a compiled lambda to set the Id to the field
-                    var entityParameter = Expression.Parameter(typeof(object), "entity");
-                    var valueParameter = Expression.Parameter(typeof(int), "value");
-                    var castEntity = Expression.Convert(entityParameter, Type);
-                    var fieldAccess = Expression.Field(castEntity, fieldInfo);
-                    var assign = Expression.Assign(fieldAccess,
-                        Expression.Convert(valueParameter, fieldInfo.FieldType));
-                    var lambda = Expression.Lambda<Action<object, int>>(assign, entityParameter, valueParameter);
-                    _setIdFunc = lambda.Compile();
-                }
-
-                if (_setIdFunc is null)
-                {
-                    throw new InvalidOperationException($"Id member not found or not writable on type '{Name}'.");
-                }
-
-                return _setIdFunc;
+                return getter(entity);
             }
+
+            throw new InvalidOperationException($"Getter not found for member '{memberName}' in type '{Name}'.");
+        }
+
+        public void SetMemberValue(object entity, string memberName, object value)
+        {
+            if (_setters.TryGetValue(memberName, out var setter))
+            {
+                setter(entity, value);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Setter not found for member '{memberName}' in type '{Name}'.");
+            }
+        }
+
+        public int GetId(object entity)
+        {
+            if (_getIdFunc != null)
+                return _getIdFunc(entity);
+
+            throw new InvalidOperationException($"Id getter not cached for type '{Name}'.");
+        }
+
+        public void SetId(object entity, int id)
+        {
+            if (_setIdFunc != null)
+                _setIdFunc(entity, id);
+            else
+                throw new InvalidOperationException($"Id setter not cached for type '{Name}'.");
         }
 
 
@@ -287,10 +366,6 @@ namespace Ck.Database
                 ? string.Join(Environment.NewLine, CollectionReferences.Select(cr => $"  - {cr}"))
                 : "    None";
 
-            var schemaString = Schema.Any()
-                ? string.Join(Environment.NewLine, Schema.Select(m => $"  - {m.Name}"))
-                : "    None";
-
             return $@"
 Metadata:
   Name: {Name}
@@ -300,9 +375,7 @@ Metadata:
   ReferenceFields:
 {referenceFieldsString}
   CollectionReferences:
-{collectionReferencesString}
-  Schema:
-{schemaString}";
+{collectionReferencesString}";
         }
     }
 
@@ -347,13 +420,24 @@ Metadata:
 
     public class Schema : List<Metadata>
     {
+        public string DatabasePath;
         public bool Contains(string name) => this.Any(m => m.Name == name);
         public bool Contains(Type type) => this.Any(m => m.Type == type);
 
         public Metadata? GetMetadataByType(Type? type)
         {
             if (type is null) return null;
-            return this.FirstOrDefault(m => m.Name == type.Name);
+            var result = this.FirstOrDefault(m => m.Name == type.Name);
+            if (result is null)
+            {
+                MetadataBuilder.BuildSchema(type, this);
+                return this.FirstOrDefault(m => m.Name == type.Name);
+            }
+            else
+            {
+                
+                return result;
+            }
         }
 
         public override string ToString()
@@ -378,12 +462,20 @@ Metadata:
         {
             if (!Directory.Exists(directoryPath)) Directory.CreateDirectory(directoryPath);
             var filePath = Path.Combine(directoryPath, "Schema.json");
-            if (!File.Exists(filePath)) return new Schema();
+            if (!File.Exists(filePath)) return new Schema { DatabasePath = directoryPath };
             var json = File.ReadAllText(filePath);
-            return JsonConvert.DeserializeObject<Schema>(json, new JsonSerializerSettings
+            var schema = JsonConvert.DeserializeObject<Schema>(json, new JsonSerializerSettings
             {
                 TypeNameHandling = TypeNameHandling.Auto // Preserve type information
-            }) ?? new Schema();
+            }) ?? new Schema { DatabasePath = directoryPath };
+
+            schema.DatabasePath = directoryPath;
+            foreach (var metadata in schema)
+            {
+                metadata.CacheMemberAccessors();
+                
+            }
+            return schema;
         }
     }
 }

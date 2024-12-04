@@ -8,37 +8,37 @@ public class TestAuthors
     {
         var path = @"C:\TEMP\TestDbAuthors";
         if (Directory.Exists(path)) Directory.Delete(path, true);
-        var author = new Author
+        var author = new CircleAuthor
         {
             Name = "John Doe",
-            Books = new List<Book>
+            Books = new List<CircleBook>
             {
-                new Book { Title = "Book 1" },
-                new Book { Title = "Book 2" }
+                new CircleBook { Title = "Book 1" },
+                new CircleBook { Title = "Book 2" }
             }
         };
         
         // Set the Author reference in each Book
         foreach (var book in author.Books)
         {
-            book.Author = author;
+            book.CircleAuthor = author;
         }
 
         var database = new Database(path);
         database.Store(author);
         var authorId = author.Id;
-
+        
         database.Dispose();
         database = new Database(path);
-        var secondAuthor = await database.Find<Author>(authorId);
+        var secondAuthor = database.Find<CircleAuthor>(authorId);
         Assert.Equal(2, secondAuthor.Books.Count);
-
+        
         secondAuthor.Books.Remove(secondAuthor.Books[1]);
         database.Store(secondAuthor);
         
         database.Dispose();
         database = new Database(path);
-        var thirdAuthor = await database.Find<Author>(authorId);
+        var thirdAuthor = database.Find<CircleAuthor>(authorId);
         Assert.Single(thirdAuthor.Books);
 
     }

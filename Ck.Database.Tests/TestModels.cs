@@ -23,6 +23,20 @@ public class Drink
     public int Id;
 }
 
+public class CircleAuthor
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public List<CircleBook> Books { get; set; }
+}
+
+public class CircleBook
+{
+    public int Id { get; set; }
+    public string Title { get; set; }
+    public CircleAuthor CircleAuthor { get; set; }
+}
+
 public class Author
 {
     public int Id { get; set; }
@@ -34,5 +48,21 @@ public class Book
 {
     public int Id { get; set; }
     public string Title { get; set; }
-    public Author Author { get; set; }
+    public Publication Publication { get; set; }
+    public List<Reviewer> Reviewers { get; set; }
 }
+
+public class Publication
+{
+    public int Id { get; set; }
+    public string PublisherName { get; set; }
+    public DateTime PublishDate { get; set; }
+}
+
+public class Reviewer
+{
+    public int Id { get; set; }
+    public string ReviewerName { get; set; }
+    public string Review { get; set; }
+}
+
