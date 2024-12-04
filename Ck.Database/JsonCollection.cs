@@ -1,4 +1,5 @@
 ﻿
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,7 +7,7 @@ using Newtonsoft.Json;
 
 namespace Ck.Database
 {
-    public class Collection<T>
+    public class JsonCollection<T>
     {
         private readonly Schema _schema;
         private readonly Metadata _metadata;
@@ -14,12 +15,12 @@ namespace Ck.Database
         private readonly string _filePath;
         private readonly IdFarm _idFarm;
 
-        public Collection(Schema schema, IdFarm idFarm)
+        public JsonCollection(Schema schema, IdFarm idFarm)
         {
             var typeName = typeof(T).Name;
             _filePath =  Path.Combine(schema.DatabasePath, $"{typeName}.json");
             _schema = schema;
-            _metadata = _schema.GetMetadataByType(typeof(T));
+            _metadata = _schema.GetMetadataByType(typeof(T)) ?? throw new Exception("Invalid Metadata schema");
             _idFarm = idFarm;
             _entities = new Dictionary<int, T>();
 

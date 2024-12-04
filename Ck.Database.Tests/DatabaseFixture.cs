@@ -3,13 +3,13 @@
 public class DatabaseFixture : IDisposable
 {
     public string Path { get; }
-    public Database Database { get; }
+    public JsonDatabase JsonDatabase { get; }
 
     public DatabaseFixture()
     {
         Path = @"C:\TEMP\TestDb";
         if (Directory.Exists(Path)) Directory.Delete(Path, true);
-        Database = new Database(Path);
+        JsonDatabase = new JsonDatabase(Path);
 
         // Setup initial data
         var foo = new Foo
@@ -27,7 +27,7 @@ public class DatabaseFixture : IDisposable
                 new Drink { Name = "Whiskey" },
             }
         };
-        Database.Store(foo);
+        JsonDatabase.Store(foo);
     }
 
     public void Dispose()

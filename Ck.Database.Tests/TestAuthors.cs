@@ -24,12 +24,12 @@ public class TestAuthors
             book.CircleAuthor = author;
         }
 
-        var database = new Database(path);
+        var database = new JsonDatabase(path);
         database.Store(author);
         var authorId = author.Id;
         
         database.Dispose();
-        database = new Database(path);
+        database = new JsonDatabase(path);
         var secondAuthor = database.Find<CircleAuthor>(authorId);
         Assert.Equal(2, secondAuthor.Books.Count);
         
@@ -37,7 +37,7 @@ public class TestAuthors
         database.Store(secondAuthor);
         
         database.Dispose();
-        database = new Database(path);
+        database = new JsonDatabase(path);
         var thirdAuthor = database.Find<CircleAuthor>(authorId);
         Assert.Single(thirdAuthor.Books);
 

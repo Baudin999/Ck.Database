@@ -3,13 +3,13 @@
 public class AuthorFixture : IDisposable
 {
     public string Path { get; }
-    public Database Database { get; }
+    public JsonDatabase JsonDatabase { get; }
 
     public AuthorFixture()
     {
         Path = @"C:\TEMP\Db003";
         if (Directory.Exists(Path)) Directory.Delete(Path, true);
-        Database = new Database(Path);
+        JsonDatabase = new JsonDatabase(Path);
 
         // Setup initial data
         var publication = new Publication
@@ -44,7 +44,7 @@ public class AuthorFixture : IDisposable
         };
 
         // Store objects
-        Database.Store(author);
+        JsonDatabase.Store(author);
     }
 
     public void Dispose()

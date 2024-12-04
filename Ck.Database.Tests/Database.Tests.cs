@@ -1,11 +1,11 @@
 ﻿
 namespace Ck.Database.Tests
 {
-    public class DatabaseTests : IClassFixture<DatabaseFixture>
+    public class JsonDatabaseTests : IClassFixture<DatabaseFixture>
     {
         private readonly DatabaseFixture _fixture;
 
-        public DatabaseTests(DatabaseFixture fixture)
+        public JsonDatabaseTests(DatabaseFixture fixture)
         {
             _fixture = fixture;
         }

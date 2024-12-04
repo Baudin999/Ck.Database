@@ -17,7 +17,7 @@ namespace Ck.Database.Tests
         public void ShouldStoreAndRetrieveEntityCorrectly()
         {
             // Arrange
-            var database = new Database(_testDirectory);
+            var database = new JsonDatabase(_testDirectory);
 
             var author = new Author
             {
@@ -37,7 +37,7 @@ namespace Ck.Database.Tests
         public void ShouldFindAllEntitiesCorrectly()
         {
             // Arrange
-            var database = new Database(_testDirectory);
+            var database = new JsonDatabase(_testDirectory);
 
             var author1 = new Author { Name = "J.K. Rowling" };
             var author2 = new Author { Name = "George R.R. Martin" };
@@ -59,7 +59,7 @@ namespace Ck.Database.Tests
         public void ShouldDeleteEntityCorrectly()
         {
             // Arrange
-            var database = new Database(_testDirectory);
+            var database = new JsonDatabase(_testDirectory);
 
             var author = new Author
             {
@@ -80,7 +80,7 @@ namespace Ck.Database.Tests
         public void ShouldUpdateEntityCorrectly()
         {
             // Arrange
-            var database = new Database(_testDirectory);
+            var database = new JsonDatabase(_testDirectory);
 
             var author = new Author
             {
@@ -104,7 +104,7 @@ namespace Ck.Database.Tests
         public void ShouldHandleComplexRelationships()
         {
             // Arrange
-            var database = new Database(_testDirectory);
+            var database = new JsonDatabase(_testDirectory);
 
             var publication = new Publication
             {
