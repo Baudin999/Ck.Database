@@ -2,11 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
 
 namespace Ck.Database
 {
@@ -26,6 +22,14 @@ namespace Ck.Database
             _idFarm = new IdFarm(databasePath);
             _collections = new Dictionary<string, object>();
             _schema = Schema.LoadFromJson(_databasePath);
+        }
+
+        public void SaveAll()
+        {
+            foreach (var collection in _collections.Values)
+            {
+                if (collection is IJsonCollection iCollection) iCollection.Save();
+            }
         }
 
         public void Store<T>(T entity)

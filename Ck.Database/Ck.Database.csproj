@@ -7,7 +7,7 @@
 
         <!-- NuGet metadata -->
         <PackageId>Ck.Database</PackageId>
-        <Version>1.0.0</Version>
+        <Version>1.0.1</Version>
         <Authors>Baudin999</Authors>
         <Description>A simple JSON database package.</Description>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>

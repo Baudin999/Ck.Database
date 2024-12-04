@@ -7,7 +7,12 @@ using Newtonsoft.Json;
 
 namespace Ck.Database
 {
-    public class JsonCollection<T>
+    public interface IJsonCollection
+    {
+        void Save();
+    }
+
+    public class JsonCollection<T> : IJsonCollection
     {
         private readonly Schema _schema;
         private readonly Metadata _metadata;
