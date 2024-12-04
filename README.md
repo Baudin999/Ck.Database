@@ -18,7 +18,25 @@
 
 ## Installation
 
-Add the **Ck.Database** namespace to your project and ensure the required libraries for JSON serialization (e.g., `System.Text.Json`) are included.
+To install **Ck.Database**, add the NuGet package to your project. 
+
+### Using Package Manager Console
+```bash
+Install-Package Ck.Database -Version 1.0.0
+```
+
+### Using .NET CLI
+```bash
+dotnet add package Ck.Database --version 1.0.0
+```
+
+### Adding to .csproj
+Add the following line to your `.csproj` file:
+```xml
+<PackageReference Include="Ck.Database" Version="1.0.0" />
+```
+
+For more information, visit the [Ck.Database NuGet page](https://www.nuget.org/packages/Ck.Database/1.0.0).
 
 ---
 
