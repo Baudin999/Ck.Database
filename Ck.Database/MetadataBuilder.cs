@@ -199,6 +199,9 @@ namespace Ck.Database
         [JsonIgnore] private Func<object, int> _getIdFunc = null;
 
         [JsonIgnore] private Action<object, int> _setIdFunc = null;
+        
+        // Save<T> caching
+        [JsonIgnore] private Action<object> _saveFunc = null;
 
         public Metadata()
         {
@@ -209,6 +212,7 @@ namespace Ck.Database
         {
             
         }
+
 
         public void CacheMemberAccessors()
         {

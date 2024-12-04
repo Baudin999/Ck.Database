@@ -50,7 +50,7 @@ namespace Ck.Database
             _entities.Remove(id);
         }
 
-        public T Find(int id)
+        public T? Find(int id)
         {
             _entities.TryGetValue(id, out var entity);
             return entity;

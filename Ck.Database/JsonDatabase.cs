@@ -106,7 +106,7 @@ namespace Ck.Database
             }
         }
 
-        public T Find<T>(int id)
+        public T? Find<T>(int id)
         {
             var collection = GetOrCreateCollection<T>();
             var entity = collection.Find(id);
