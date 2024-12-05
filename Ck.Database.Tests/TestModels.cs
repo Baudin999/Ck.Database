@@ -8,6 +8,14 @@ public class Foo
     public string Name { get; set; }
     public Bar Bar;
     public List<Drink> Somethings { get; set; }
+    public Internal Internal;
+}
+
+public class Internal
+{
+    public int X;
+    public int Y;
+    public int Z;
 }
 
 public class Bar

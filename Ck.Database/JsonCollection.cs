@@ -11,8 +11,16 @@ namespace Ck.Database
     {
         void Save();
     }
+    
+    public interface IJsonCollection<T> : IJsonCollection
+    {
+        void Add(T entity);
+        void Remove(int id);
+        T Find(int id);
+        List<T> FindAll();
+    }
 
-    public class JsonCollection<T> : IJsonCollection
+    public class JsonCollection<T> : IJsonCollection<T>
     {
         private readonly Schema _schema;
         private readonly Metadata _metadata;
@@ -60,6 +68,16 @@ namespace Ck.Database
         {
             return _entities.Values.ToList();
         }
+        
+        public void Reset()
+        {
+            // Clear the current collection
+            _entities.Clear();
+
+            // Reload entities from file
+            Load();
+        }
+
 
         public void Save()
         {

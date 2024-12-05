@@ -25,6 +25,12 @@ public class DatabaseFixture : IDisposable
                 new Drink { Name = "Gin & Tonic" },
                 new Drink { Name = "Beer" },
                 new Drink { Name = "Whiskey" },
+            },
+            Internal = new Internal
+            {
+                X = 1,
+                Y = 2,
+                Z = 3
             }
         };
         JsonDatabase.Store(foo);

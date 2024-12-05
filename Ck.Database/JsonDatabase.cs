@@ -119,6 +119,12 @@ namespace Ck.Database
             return entity;
         }
 
+        public void Reset<T>()
+        {
+            var collection = GetOrCreateCollection<T>();
+            collection.Reset();
+        }
+
         private void ResolveEntityReferences(object entity, Metadata metadata)
         {
             ResolveEntityReferencesRecursive(entity, metadata);

@@ -216,9 +216,11 @@ namespace Ck.Database
 
         public void CacheMemberAccessors()
         {
-            
-            // Cache Id getter and setter
-            CacheIdAccessors();
+            if (IsEntity)
+            {
+                // Cache Id getter and setter
+                CacheIdAccessors();
+            }
             
             // Cache getters and setters for fields
             foreach (var field in Fields)
